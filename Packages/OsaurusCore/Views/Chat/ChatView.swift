@@ -8759,9 +8759,16 @@ final class ChatSession: ObservableObject {
                 turnGenerationControls.reasoningEffort
             ) { [self] () async -> Void in
             // Same flag `turnToMessage` uses to encode tool-turn images, so
-            // `file_read` never stages an image the request would drop.
+            // `file_read` never stages an image the request would drop. The
+            // Router removes images on the wire for models it cannot send
+            // them to, so those fall back to OCR text here as well.
+            var turnToolResultImages = turnSupportsImages
+            if turnToolResultImages, let turnModelId {
+                turnToolResultImages = await RemoteProviderManager.shared
+                    .acceptsToolResultImages(forModel: turnModelId)
+            }
             await ChatExecutionContext.$toolResultImagesEnabled.withValue(
-                turnSupportsImages
+                turnToolResultImages
             ) { [self] () async -> Void in
                 await runTurn()
             }  // ChatExecutionContext.$toolResultImagesEnabled.withValue

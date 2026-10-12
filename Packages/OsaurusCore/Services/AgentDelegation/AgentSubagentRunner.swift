@@ -177,8 +177,17 @@ enum AgentSubagentRunner {
         // Whether the child's model can view images. Gates both what
         // `file_read` stages (image vs OCR) and how the tool message is
         // encoded, so the two never disagree.
-        let childAcceptsImages = await MainActor.run {
+        // The Router can still remove images for a model its catalog lists
+        // as vision (rejection quarantine), so ask it too.
+        let modelAcceptsImages = await MainActor.run {
             ComputerUseTool.modelAcceptsImages(modelName)
+        }
+        let childAcceptsImages: Bool
+        if modelAcceptsImages {
+            childAcceptsImages = await RemoteProviderManager.shared
+                .acceptsToolResultImages(forModel: modelName)
+        } else {
+            childAcceptsImages = false
         }
         let toolTokens: Int
         if let set = toolset {

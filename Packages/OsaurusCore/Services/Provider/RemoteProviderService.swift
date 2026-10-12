@@ -421,6 +421,18 @@ public actor RemoteProviderService: ToolCapableService {
             && !routerRejectedImageInputModelIds.contains(modelId)
     }
 
+    /// Whether a tool may stage an image for `requestedModel` (prefixed or
+    /// not). Only the Router gates this: its wire layer removes images for
+    /// models outside the vision catalog or in the rejection quarantine, so a
+    /// tool that staged one would promise the model an image it never gets.
+    /// Every other provider keeps the chat-side answer.
+    func acceptsToolResultImages(requestedModel: String) -> Bool {
+        guard provider.providerType == .osaurusRouter,
+            let modelId = extractModelName(requestedModel)
+        else { return true }
+        return routerModelSupportsImageInput(modelId)
+    }
+
     func routerWireCompatibleMessagesForCurrentCapabilities(
         _ messages: [ChatMessage],
         modelId: String

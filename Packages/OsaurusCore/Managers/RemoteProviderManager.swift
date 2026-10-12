@@ -1524,6 +1524,15 @@ public final class RemoteProviderManager: ObservableObject {
         Set(catalog.compactMap { id, model in model.supportsVision ? id : nil })
     }
 
+    /// Whether a tool result may carry an image to `modelId`. False only for
+    /// an Osaurus Router model whose wire layer would remove the image (see
+    /// `RemoteProviderService.acceptsToolResultImages`), so `file_read` can
+    /// fall back to OCR text instead of staging an image that never ships.
+    func acceptsToolResultImages(forModel modelId: String) async -> Bool {
+        guard let service = findService(forModel: modelId) else { return true }
+        return await service.acceptsToolResultImages(requestedModel: modelId)
+    }
+
     /// Find the service that handles a given model
     public func findService(forModel model: String) -> RemoteProviderService? {
         for service in services.values where service.handles(requestedModel: model) {

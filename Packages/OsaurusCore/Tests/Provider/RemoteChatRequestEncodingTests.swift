@@ -1889,6 +1889,7 @@ struct RemoteChatRequestEncodingTests {
             modelId: model
         )
         #expect(before.first?.contentParts != nil)
+        #expect(await service.acceptsToolResultImages(requestedModel: model))
 
         await service.recordRouterImageInputRejection(for: model)
 
@@ -1898,7 +1899,14 @@ struct RemoteChatRequestEncodingTests {
         )
         #expect(after.first?.contentParts == nil)
         #expect(after.first?.content?.contains("removed") == true)
+
         #expect(after.last?.content == "There is no image attached now.")
+
+        // Tool results follow the same gate, prefixed or not, so `file_read`
+        // falls back to OCR instead of staging an image the wire removes.
+        #expect(await service.acceptsToolResultImages(requestedModel: model) == false)
+        #expect(await service.acceptsToolResultImages(requestedModel: "osaurus-router/\(model)") == false)
+        #expect(await service.acceptsToolResultImages(requestedModel: "osaurus-router/not-in-catalog") == false)
     }
 
     /// A Router metadata quarantine must never leak into the ChatGPT OAuth
