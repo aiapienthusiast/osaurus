@@ -337,7 +337,7 @@ let package = Package(
         // asArrayChecked used by PrivacyFilterKit below.
         .package(
             url: "https://github.com/osaurus-ai/vmlx-swift",
-            revision: "474bb5e81c18d122f27d7ff7f1acb349bd5051d9"
+            revision: "86ca1714fb283a2a247ec5d7ee3b73c1ea7d8611"
         ),
         // FluidAudio 0.14.3 added a breaking `language:` parameter to TTS
         // calls that osaurus's `TTSService` doesn't pass. Pinning to the
