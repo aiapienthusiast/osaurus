@@ -168,6 +168,19 @@ final class FrameScrubberTests: XCTestCase {
             XCTAssertEqual(all.1.maskedRegions, all.1.textRegions)
         }
     }
+
+    /// Regression for APPLE-MACOS-37K: a degenerate image Vision can't
+    /// recognize must fall back to an empty scan instead of trapping on a
+    /// double-resumed continuation.
+    func testDegenerateImageDoesNotTrap() async {
+        let image = renderCGImage(text: "", size: CGSize(width: 1, height: 1))
+        for mode in [ScrubMode.pii, .allText] {
+            if let result = await FrameScrubber.scrub(cgImage: image, mode: mode) {
+                XCTAssertEqual(result.1.textRegions, 0)
+                XCTAssertEqual(result.1.maskedRegions, 0)
+            }
+        }
+    }
 }
 
 // MARK: - Metrics

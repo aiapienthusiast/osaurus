@@ -127,7 +127,7 @@ public enum FrameScrubber {
         let scan = await recognizeAndDetect(in: cgImage, mode: mode, ruleset: ruleset)
         var regions = scan.regions
         var categories = scan.categories
-        // The regex pass (inside the Vision handler) masks the precise spans it
+        // The regex pass (inside `recognizeAndDetect`) masks the precise spans it
         // can. The model owns `person`/`address`/`date`/`secret`, which have no
         // regex — run it per OCR region and mask the whole region on a hit
         // (recall over precision, the same philosophy the regex line-fallback
@@ -161,9 +161,9 @@ public enum FrameScrubber {
 
     // MARK: - Vision OCR
 
-    /// Everything that touches the non-`Sendable` Vision objects happens inside
-    /// the completion handler; only the distilled, `Sendable` geometry crosses
-    /// the continuation (Swift 6 strict-concurrency safe).
+    /// Everything that touches the non-`Sendable` Vision objects stays local to
+    /// `recognizeAndDetect`; only the distilled, `Sendable` geometry leaves it
+    /// (Swift 6 strict-concurrency safe).
     private struct OCRScan: Sendable {
         /// Regions to mask, in normalized (0…1, bottom-left) coordinates.
         let regions: [CGRect]
@@ -190,60 +190,55 @@ public enum FrameScrubber {
         mode: ScrubMode,
         ruleset: RegexEntityDetector.EffectiveRuleSet
     ) async -> OCRScan {
-        await withCheckedContinuation { (continuation: CheckedContinuation<OCRScan, Never>) in
-            let request = VNRecognizeTextRequest { request, _ in
-                let observations = (request.results as? [VNRecognizedTextObservation]) ?? []
-                var regions: [CGRect] = []
-                var categories: [String: Int] = [:]
-                var scanned: [OCRObservation] = []
-                for observation in observations {
-                    guard let candidate = observation.topCandidates(1).first else { continue }
-                    switch mode {
-                    case .allText:
+        // `VNImageRequestHandler.perform` is synchronous, so read the results
+        // after it returns instead of bridging a completion handler through a
+        // continuation. Vision invokes the completion handler even when the
+        // request fails *and* then throws from `perform`, which previously
+        // resumed the continuation twice (APPLE-MACOS-37K).
+        let empty = OCRScan(regions: [], categories: [:], textRegions: 0, observations: [])
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            return empty
+        }
+        guard let observations = request.results else { return empty }
+
+        var regions: [CGRect] = []
+        var categories: [String: Int] = [:]
+        var scanned: [OCRObservation] = []
+        for observation in observations {
+            guard let candidate = observation.topCandidates(1).first else { continue }
+            switch mode {
+            case .allText:
+                regions.append(observation.boundingBox)
+            case .pii:
+                let text = candidate.string
+                // The detector's ranges index `candidate.string` directly, so
+                // they pass straight to Vision's `boundingBox(for:)`.
+                for match in RegexEntityDetector.detect(in: text, ruleset: ruleset) {
+                    categories[categoryToken(match.category), default: 0] += 1
+                    if let rect = (try? candidate.boundingBox(for: match.range)) ?? nil {
+                        regions.append(rect.boundingBox)
+                    } else {
+                        // Fall back to masking the whole line when sub-range geometry
+                        // isn't available — recall over precision, like PrivacyFilter.
                         regions.append(observation.boundingBox)
-                    case .pii:
-                        let text = candidate.string
-                        // The detector's ranges index `candidate.string` directly, so
-                        // they pass straight to Vision's `boundingBox(for:)`.
-                        for match in RegexEntityDetector.detect(in: text, ruleset: ruleset) {
-                            categories[categoryToken(match.category), default: 0] += 1
-                            if let rect = (try? candidate.boundingBox(for: match.range)) ?? nil {
-                                regions.append(rect.boundingBox)
-                            } else {
-                                // Fall back to masking the whole line when sub-range geometry
-                                // isn't available — recall over precision, like PrivacyFilter.
-                                regions.append(observation.boundingBox)
-                            }
-                        }
-                        // Carry the region out for the optional model pass.
-                        scanned.append(OCRObservation(text: text, box: observation.boundingBox))
                     }
                 }
-                continuation.resume(
-                    returning: OCRScan(
-                        regions: regions,
-                        categories: categories,
-                        textRegions: observations.count,
-                        observations: scanned
-                    )
-                )
-            }
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = false
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            do {
-                try handler.perform([request])
-            } catch {
-                continuation.resume(
-                    returning: OCRScan(
-                        regions: [],
-                        categories: [:],
-                        textRegions: 0,
-                        observations: []
-                    )
-                )
+                // Carry the region out for the optional model pass.
+                scanned.append(OCRObservation(text: text, box: observation.boundingBox))
             }
         }
+        return OCRScan(
+            regions: regions,
+            categories: categories,
+            textRegions: observations.count,
+            observations: scanned
+        )
     }
 
     // MARK: - Masking
